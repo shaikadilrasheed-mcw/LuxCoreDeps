@@ -215,7 +215,6 @@ else
     --version=$LUXDEPS_VERSION \
     --remote=mycenter \
     --remote=mylocal \
-    --remote=conancenter \
     --build=missing
 fi
 echo "::endgroup::"
