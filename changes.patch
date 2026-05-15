@@ -1,0 +1,6 @@
+0001-feat-build-enable-Windows-on-ARM64-support.patch
+0002-modified-condition-of-local-embree-for-arm64.patch
+0003-removed-embree-files.patch
+0004-Gaurded-embree-check-for-arm-and-linux.patch
+0005-created-conan-local-recipes-arm64-for-embree.patch
+0006-Add-embree4.lib-via-Git-LFS.patch
