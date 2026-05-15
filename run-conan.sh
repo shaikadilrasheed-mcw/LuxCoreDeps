@@ -88,7 +88,30 @@ conan remote add mycenter ./conan-center-index --force
 # 2. Add local recipe repository (as a remote)
 conan remote add mylocal ./conan-local-recipes --force
 conan list -r mylocal
+
+# Add ARM64-specific recipes only on ARM64
+if [ "$RUNNER_ARCH" == "ARM64" ]; then
+  conan remote add mylocal-arm64 ./conan-local-recipes-arm64 --force
+  conan list -r mylocal-arm64
+fi
 echo "::endgroup::"
+
+# 2.5 Only create local embree package on ARM64
+if [ "$RUNNER_ARCH" == "ARM64" ]; then
+  echo "::group::CIBW_BEFORE_BUILD: Build local packages"
+  cd $WORKSPACE/conan-local-recipes-arm64/recipes/embree/all  
+  echo "Current directory: $(pwd)"
+  echo "Checking for prebuilt/lib/embree4.lib"
+  ls -la prebuilt/lib/
+  if [ -f "prebuilt/lib/embree4.lib" ]; then
+    echo "File found, creating package"
+    conan create . --profile:all=$WORKSPACE/conan-profiles/$CONAN_PROFILE --version=4.4.0
+  else
+    echo "::warning::Prebuilt Embree not found, skipping local package creation"
+  fi
+  cd $WORKSPACE
+  echo "::endgroup::"
+fi
 
 if [[ "$RUNNER_OS" == "Linux" ]]; then
   # ispc
@@ -145,13 +168,24 @@ fi
 echo "::group::CIBW_BEFORE_BUILD: Explain graph"
 # This is only for debugging purpose...
 cd $WORKSPACE
-conan graph info $WORKSPACE \
-  --profile:all=$CONAN_PROFILE \
-  --version=$LUXDEPS_VERSION \
-  --remote=mycenter \
-  --remote=mylocal \
-  --build=missing \
-  --format=dot
+if [ "$RUNNER_ARCH" == "ARM64" ]; then
+  conan graph info $WORKSPACE \
+    --profile:all=$CONAN_PROFILE \
+    --version=$LUXDEPS_VERSION \
+    --remote=mycenter \
+    --remote=mylocal \
+    --remote=mylocal-arm64 \
+    --build=missing \
+    --format=dot
+else
+  conan graph info $WORKSPACE \
+    --profile:all=$CONAN_PROFILE \
+    --version=$LUXDEPS_VERSION \
+    --remote=mycenter \
+    --remote=mylocal \
+    --build=missing \
+    --format=dot
+fi
 echo "::endgroup::"
 
 # (Debug) Install particular package, for debugging
@@ -166,12 +200,24 @@ echo "::endgroup::"
 # precompiled binaries and it forces compilation)
 echo "::group::CIBW_BEFORE_BUILD: Create LuxCore Deps"
 cd $WORKSPACE
-conan create $WORKSPACE \
-  --profile:all=$CONAN_PROFILE \
-  --version=$LUXDEPS_VERSION \
-  --remote=mycenter \
-  --remote=mylocal \
-  --build=missing
+if [ "$RUNNER_ARCH" == "ARM64" ]; then
+  conan create $WORKSPACE \
+    --profile:all=$CONAN_PROFILE \
+    --version=$LUXDEPS_VERSION \
+    --remote=mycenter \
+    --remote=mylocal \
+    --remote=mylocal-arm64 \
+    --remote=conancenter \
+    --build=missing
+else
+  conan create $WORKSPACE \
+    --profile:all=$CONAN_PROFILE \
+    --version=$LUXDEPS_VERSION \
+    --remote=mycenter \
+    --remote=mylocal \
+    --remote=conancenter \
+    --build=missing
+fi
 echo "::endgroup::"
 
 # 8. Save result
@@ -183,14 +229,26 @@ if [[ -n "$CI" ]]; then
 fi
 conan remove -c -vverbose "*/*#!latest"  # Keep only latest version of each package
 # Save only dependencies of current target (otherwise cache gets bloated)
-conan graph info \
-  --requires=luxcoredeps/$LUXDEPS_VERSION@luxcore/luxcore \
-  --requires=luxcoreconf/$LUXDEPS_VERSION@luxcore/luxcore \
-  --format=json \
-  --remote=mycenter \
-  --remote=mylocal \
-  --profile:all=$CONAN_PROFILE \
-  > graph.json
+if [ "$RUNNER_ARCH" == "ARM64" ]; then
+  conan graph info \
+    --requires=luxcoredeps/$LUXDEPS_VERSION@luxcore/luxcore \
+    --requires=luxcoreconf/$LUXDEPS_VERSION@luxcore/luxcore \
+    --format=json \
+    --remote=mycenter \
+    --remote=mylocal \
+    --remote=mylocal-arm64 \
+    --profile:all=$CONAN_PROFILE \
+    > graph.json
+else
+  conan graph info \
+    --requires=luxcoredeps/$LUXDEPS_VERSION@luxcore/luxcore \
+    --requires=luxcoreconf/$LUXDEPS_VERSION@luxcore/luxcore \
+    --format=json \
+    --remote=mycenter \
+    --remote=mylocal \
+    --profile:all=$CONAN_PROFILE \
+    > graph.json
+fi
 conan list --graph=graph.json --format=json --graph-binaries=Cache > list.json
 conan cache save -vverbose --file=${cache_dir}/conan-cache-save.tgz --list=list.json
 # Save build info
