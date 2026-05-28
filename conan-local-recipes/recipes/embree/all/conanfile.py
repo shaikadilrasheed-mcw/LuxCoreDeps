@@ -1,19 +1,14 @@
-# SPDX-FileCopyrightText: 2026 Howetuft
-#
-# SPDX-License-Identifier: Apache-2.0
-
-import os
 from conan import ConanFile
-from conan.errors import ConanInvalidConfiguration, ConanException
+from conan.errors import ConanInvalidConfiguration
 from conan.tools.build import check_min_cppstd
 from conan.tools.apple import is_apple_os
 from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
-from conan.tools.files import copy, get, rm, rmdir, replace_in_file
+from conan.tools.files import copy, get, rm, rmdir, apply_conandata_patches, export_conandata_patches
 from conan.tools.microsoft import is_msvc, is_msvc_static_runtime
 from conan.tools.scm import Version
+import os
 
 required_conan_version = ">=2.0.9"
-
 
 class EmbreeConan(ConanFile):
     name = "embree"
@@ -26,11 +21,11 @@ class EmbreeConan(ConanFile):
     settings = "os", "arch", "compiler", "build_type"
     options = {
         "shared": [True, False],
-        "fPIC": [True, False],
+        "fPIC": [True, False]
     }
     default_options = {
         "shared": False,
-        "fPIC": True,
+        "fPIC": True
     }
     implements = ["auto_shared_fpic"]
 
@@ -40,7 +35,10 @@ class EmbreeConan(ConanFile):
 
     @property
     def _has_neon(self):
-        return "arm" in str(self.settings.arch)
+        return "arm" in self.settings.arch
+
+    def export_sources(self):
+        export_conandata_patches(self)
 
     def layout(self):
         cmake_layout(self, src_folder="src")
@@ -51,49 +49,17 @@ class EmbreeConan(ConanFile):
 
     def validate(self):
         check_min_cppstd(self, 14)
+        # See https://github.com/RenderKit/embree/blob/master/CMakeLists.txt#L538
         if (
             self.settings.compiler == "apple-clang"
             and not self.options.shared
             and Version(self.settings.compiler.version) >= "9.0"
         ):
-            raise ConanInvalidConfiguration(
-                f"{self.ref} static with apple-clang >=9 "
-                f"and multiple ISA (simd) is not supported"
-            )
-
-    def package_id(self):
-        # On Windows ARM64, Embree must be built with clang-cl but is
-        # consumed by MSVC-profile packages. Remove compiler from
-        # package_id so the clang-built binary is found by MSVC
-        # consumers without triggering a rebuild.
-        if self.info.settings.os == "Windows" and self.info.settings.arch == "armv8":
-            self.info.settings.rm_safe("compiler")
-            self.info.settings.rm_safe("compiler.version")
-            self.info.settings.rm_safe("compiler.runtime")
-            self.info.settings.rm_safe("compiler.runtime_type")
-            self.info.settings.rm_safe("compiler.runtime_version")
-            self.info.settings.rm_safe("compiler.cppstd")
-            del self.info.requires["onetbb"]
+            raise ConanInvalidConfiguration(f"{self.ref} static with apple-clang >=9 and multiple ISA (simd) is not supported")
 
     def source(self):
         get(self, **self.conan_data["sources"][self.version], strip_root=True)
-        self._patch_sources()
 
-    def _patch_sources(self):
-        # Fix 1: CMakeLists.txt - guard DPCPP branch from firing on ARM
-        replace_in_file(
-            self,
-            os.path.join(self.source_folder, "CMakeLists.txt"),
-            '(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang" AND COMPILER_HAS_SYCL_SUPPORT))',
-            '(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang" AND COMPILER_HAS_SYCL_SUPPORT AND NOT EMBREE_ARM))',
-        )
-        # Fix 2: CMakeLists.txt - detect Clang by compiler ID not generator toolset
-        replace_in_file(
-            self,
-            os.path.join(self.source_folder, "CMakeLists.txt"),
-            'ELSEIF(${CMAKE_GENERATOR_TOOLSET} MATCHES "^LLVM")',
-            'ELSEIF(${CMAKE_GENERATOR_TOOLSET} MATCHES "^LLVM" OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")',
-        )
     def generate(self):
         tc = CMakeToolchain(self)
         tc.variables["EMBREE_STATIC_LIB"] = not self.options.shared
@@ -103,47 +69,26 @@ class EmbreeConan(ConanFile):
         tc.variables["EMBREE_BACKFACE_CULLING"] = False
         tc.variables["EMBREE_IGNORE_INVALID_RAYS"] = False
         tc.variables["EMBREE_ISPC_SUPPORT"] = False
-        tc.variables["EMBREE_TASKING_SYSTEM"] = (
-            "INTERNAL"
-            if is_apple_os(self) or self.settings.os == "Emscripten"
-            else "TBB"
-        )
+        tc.variables["EMBREE_TASKING_SYSTEM"] = "INTERNAL" if is_apple_os(self) or self.settings.os == "Emscripten" else "TBB"
         tc.variables["EMBREE_MAX_ISA"] = "NONE"
         tc.variables["EMBREE_ISA_NEON"] = self._has_neon
         tc.variables["EMBREE_ISA_NEON2X"] = self._has_neon
         tc.variables["EMBREE_ISA_SSE2"] = self._has_sse_avx
         tc.variables["EMBREE_ISA_SSE42"] = self._has_sse_avx
-
+        # For Emscripten disable TBB and all ISAs. It will compile only for SSE
         if self.settings.os == "Emscripten":
             tc.variables["EMBREE_ISA_AVX"] = self._has_sse_avx
             tc.variables["EMBREE_ISA_AVX2"] = self._has_sse_avx
-            tc.variables["EMBREE_ISA_AVX512"] = (
-                self._has_sse_avx and not is_msvc(self)
-            )
-
+            tc.variables["EMBREE_ISA_AVX512"] = self._has_sse_avx and not is_msvc(self)
         if is_msvc(self):
             tc.variables["USE_STATIC_RUNTIME"] = is_msvc_static_runtime(self)
-
-        # Windows ARM64 — force clang-cl compiler
-        # MSVC cannot build Embree for ARM64, clang-cl is required
-        if self.info.settings.os == "Windows" and self.info.settings.arch == "armv8":
-            clang_cl = os.environ.get("CLANG_CL_ARM64", "").replace("\\", "/")
-            if not clang_cl:
-                raise ConanException(
-                    "CLANG_CL_ARM64 environment variable not set. "
-                    "Ensure the vswhere step ran in CI before this build."
-                )
-            tc.variables["CMAKE_C_COMPILER"] = clang_cl
-            tc.variables["CMAKE_CXX_COMPILER"] = clang_cl
-            tc.variables["CMAKE_C_COMPILER_TARGET"] = "aarch64-pc-windows-msvc"
-            tc.variables["CMAKE_CXX_COMPILER_TARGET"] = "aarch64-pc-windows-msvc"
-
         tc.generate()
 
         deps = CMakeDeps(self)
         deps.generate()
 
     def build(self):
+        apply_conandata_patches(self) 
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
@@ -165,22 +110,16 @@ class EmbreeConan(ConanFile):
         rm(self, "embree-vars.sh", os.path.join(self.package_folder))
         rm(self, "embree-vars.csh", os.path.join(self.package_folder))
 
+        # Remove MS runtime files
         for dll_pattern_to_remove in ["concrt*.dll", "msvcp*.dll", "vcruntime*.dll"]:
-            rm(
-                self,
-                pattern=dll_pattern_to_remove,
-                folder=os.path.join(self.package_folder, "bin"),
-                recursive=True,
-            )
+            rm(self, pattern=dll_pattern_to_remove, folder=os.path.join(self.package_folder, "bin"), recursive=True)
 
     def package_info(self):
         self.cpp_info.libs = ["embree4"]
         if not self.options.shared:
             self.cpp_info.libs.extend(["sys", "math", "simd", "lexers", "tasking"])
             if self._has_sse_avx:
-                self.cpp_info.libs.extend(
-                    ["embree_sse42", "embree_avx", "embree_avx2"]
-                )
+                self.cpp_info.libs.extend(["embree_sse42", "embree_avx", "embree_avx2"])
                 if not is_msvc(self):
                     self.cpp_info.libs.append("embree_avx512")
             if self._has_neon:
