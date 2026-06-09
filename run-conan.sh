@@ -131,7 +131,6 @@ for d in "${build_deps[@]}"; do
     --tool-requires=${d} \
     --profile:all=$CONAN_PROFILE \
     --build=missing \
-    --build=b2* \
     --remote=conancenter
 done
 echo "::endgroup::"
