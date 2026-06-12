@@ -3,7 +3,7 @@ from conan.errors import ConanInvalidConfiguration
 from conan.tools.build import check_min_cppstd
 from conan.tools.apple import is_apple_os
 from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
-from conan.tools.files import copy, get, rm, rmdir
+from conan.tools.files import copy, get, rm, rmdir, replace_in_file
 from conan.tools.microsoft import is_msvc, is_msvc_static_runtime
 from conan.tools.scm import Version
 import os
@@ -56,6 +56,16 @@ class EmbreeConan(ConanFile):
 
     def source(self):
         get(self, **self.conan_data["sources"][self.version], strip_root=True)
+
+        replace_in_file(
+            self,   
+            file_path="CMakeLists.txt",
+            search="SET_PROPERTY(GLOBAL PROPERTY USE_FOLDERS ON)", # A line from your screenshot
+            replace='MESSAGE("--- DEBUG: CMAKE_CXX_COMPILER_ID is: ${CMAKE_CXX_COMPILER_ID} ---")\n'
+                    'MESSAGE("--- DEBUG: CMAKE_GENERATOR_TOOLSET is: ${CMAKE_GENERATOR_TOOLSET} ---")\n'
+                    'MESSAGE("--- DEBUG: COMPILER_HAS_SYCL_SUPPORT  is: ${COMPILER_HAS_SYCL_SUPPORT} ---")\n'
+                    'SET_PROPERTY(GLOBAL PROPERTY USE_FOLDERS ON)'
+        )
 
     def generate(self):
         tc = CMakeToolchain(self)
