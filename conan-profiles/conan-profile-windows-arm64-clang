@@ -12,8 +12,7 @@ compiler.runtime_version={{ os.getenv("MSVC_RUNTIME_VERSION", "v143") }}
 
 [conf]
 tools.build:compiler_executables={"c": "clang-cl", "cpp": "clang-cl"}
-tools.cmake.cmaketoolchain:generator=Visual Studio 17 2022
-tools.cmake.cmaketoolchain:extra_variables={"CMAKE_GENERATOR_TOOLSET": "LLVM"}
+tools.cmake.cmaketoolchain:generator=Ninja
 embree/*:tools.cmake.cmaketoolchain:user_toolchain+={{os.getenv("LUX_PROFILE_DIR", profile_dir)}}/windows-vars-ARM64.cmake
 
 [options]
