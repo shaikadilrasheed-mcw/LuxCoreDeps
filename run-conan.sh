@@ -164,7 +164,7 @@ echo "::endgroup::"
 # 7. Create luxcoredeps package and all dependencies
 # (we do not specify conancenter as a remote, so it prevents conan from using
 # precompiled binaries and it forces compilation)
-echo "::group::CIBW_BEFORE_BUILD: Create LuxCore Deps 1"
+echo "::group::CIBW_BEFORE_BUILD: Create LuxCore Deps"
 cd $WORKSPACE
 
 EMBREE_PROFILE=$CONAN_PROFILE
@@ -172,17 +172,12 @@ if [[ "$RUNNER_OS" == "Windows" && "$RUNNER_ARCH" == "ARM64" ]]; then
   EMBREE_PROFILE=$CLANG_PROFILE_ARM64
 fi
 
-conan create $WORKSPACE \
+conan create conan-center-index/recipes/embree/all \
   --profile:all=$EMBREE_PROFILE \
   --version=4.4.1 \
   --build=embree* \
   --build=missing \
   --remote=conancenter
-  
-echo "::endgroup::"
-
-echo "::group::CIBW_BEFORE_BUILD: Create LuxCore Deps 2"
-
 
 conan create $WORKSPACE \
   --profile:all=$CONAN_PROFILE \
